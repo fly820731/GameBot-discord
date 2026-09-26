@@ -1,0 +1,28 @@
+# GameBot-discord 規格書（Spec）
+
+Discord Bot：輸入遊戲名稱，列出這款遊戲在聯合新聞網・遊戲角落的最新情報。
+
+- 語言：Python 3.10+；依賴 `discord.py>=2.3`、`python-dotenv`
+- 啟動：`python bot.py`；部署：Railway（`railway.json`，失敗自動重啟最多 10 次）
+
+## 環境變數
+
+| 變數 | 必填 | 預設值 | 說明 |
+|---|---|---|---|
+| `DISCORD_TOKEN` | ✅ | — | Discord Bot Token |
+| `SEARCH_URL` | | `https://game.udn.com/game/search/{q}` | 搜尋網址，`{q}` 換成網址編碼後的遊戲名稱 |
+
+## 指令
+
+`/game name:<遊戲名稱> count:<1–10，預設 5>`（所有人可用，結果公開）
+
+1. 先 defer（顯示思考中），下載 `SEARCH_URL`（逾時 20 秒、只讀前 2 MB、瀏覽器 User-Agent）。
+2. 找出搜尋結果頁裡所有 `udn.com` 的文章連結（路徑 `/game/story/<分類>/<編號>` 或 `/news/story/<分類>/<編號>`），去掉查詢參數、去重，依文章編號由新到舊取前 `count` 篇。
+3. 同時下載每篇文章，讀 `og:title`、`og:description`、`og:image`、發布時間（`article:published_time`／`datePublished`／`date`）。文章讀不到時只用搜尋頁的連結文字當標題。
+4. 回覆「🎮 **{名稱}** 最新 N 篇情報（遊戲角落搜尋結果連結）」加上每篇一張卡片：標題（去掉「 | 遊戲角落」）連到原文、摘要前 300 字、縮圖、發布時間。
+5. 找不到文章 →「📭 遊戲角落找不到「{名稱}」的相關文章。」；搜尋頁下載失敗 →「⚠️ 查詢失敗：…」。
+
+## 已知限制
+
+- 只讀靜態 HTML；若搜尋結果改成用 JavaScript 載入，會找不到文章，需要改程式或 `SEARCH_URL`。
+- 以文章編號判斷新舊；搜尋結果只涵蓋搜尋頁第一頁出現的文章。
