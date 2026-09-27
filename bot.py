@@ -86,8 +86,8 @@ class MetaParser(HTMLParser):
                 self.meta.setdefault(key, a["content"].strip())
 
 
-def find_articles(html: str, base: str, limit: int) -> list[tuple[str, str]]:
-    """搜尋結果頁 → [(文章網址, 連結文字)]，依文章編號由新到舊。"""
+def find_articles(html: str, base: str) -> list[tuple[str, str]]:
+    """搜尋結果頁 → [(文章網址, 連結文字)]，依文章編號由新到舊（含側欄等不相關的連結，之後再過濾）。"""
     parser = LinkParser()
     parser.feed(html)
     found: dict[str, tuple[int, str, str]] = {}
@@ -101,17 +101,29 @@ def find_articles(html: str, base: str, limit: int) -> list[tuple[str, str]]:
         if not old or len(text) > len(old[1]):  # 同一篇常有圖片、標題兩個連結，留文字較長的
             found[url] = (int(m.group(1)), text, url)
     ranked = sorted(found.values(), key=lambda x: -x[0])
-    return [(url, text) for _, text, url in ranked[:limit]]
+    return [(url, text) for _, text, url in ranked]
 
 
-async def article_embed(session: aiohttp.ClientSession, url: str, fallback_title: str) -> discord.Embed:
-    meta: dict[str, str] = {}
+def squash(text: str) -> str:
+    """比對用：轉小寫、去掉空白。"""
+    return "".join(text.lower().split())
+
+
+def mentions(game: str, *texts: str) -> bool:
+    return squash(game) in squash(" ".join(texts))
+
+
+async def fetch_meta(session: aiohttp.ClientSession, url: str) -> dict[str, str]:
     try:
         p = MetaParser()
         p.feed(await fetch_html(session, url))
-        meta = p.meta
+        return p.meta
     except Exception as e:
         print(f"[game] 讀取 {url} 失敗：{e!r}")
+        return {}
+
+
+def article_embed(url: str, meta: dict[str, str], fallback_title: str) -> discord.Embed:
     title = (meta.get("og:title") or fallback_title or url).split(" | ")[0].strip()
     desc = meta.get("og:description") or meta.get("description") or ""
     embed = discord.Embed(title=title[:256], url=url, description=desc[:300], color=discord.Color.blurple())
@@ -126,14 +138,35 @@ async def article_embed(session: aiohttp.ClientSession, url: str, fallback_title
     return embed
 
 
+MAX_CHECK = 20  # 最多下載幾篇文章來確認有沒有提到這款遊戲
+
+
 async def latest_news(game: str, count: int) -> tuple[str, list[discord.Embed]]:
+    """搜尋頁上也有側欄「最新／熱門文章」的連結，所以只留標題或摘要有提到遊戲名稱的文章。"""
     search_url = SEARCH_URL.format(q=quote(game))
-    timeout = aiohttp.ClientTimeout(total=20)
+    timeout = aiohttp.ClientTimeout(total=30)
     async with aiohttp.ClientSession(timeout=timeout, headers=HEADERS) as session:
-        articles = find_articles(await fetch_html(session, search_url), search_url, count)
-        print(f"[game] {game!r} 找到 {len(articles)} 篇")
-        embeds = await asyncio.gather(*(article_embed(session, url, text) for url, text in articles))
-    return search_url, list(embeds)
+        links = find_articles(await fetch_html(session, search_url), search_url)
+        # 連結文字已經有遊戲名稱的先排前面，其餘的再下載確認；各自維持新到舊
+        candidates = ([l for l in links if mentions(game, l[1])] + [l for l in links if not mentions(game, l[1])])
+        candidates = candidates[:MAX_CHECK]
+        results: list[tuple[int, str, dict, str]] = []
+        checked = 0
+        for i in range(0, len(candidates), 5):  # 一次下載 5 篇，湊滿 count 篇就停
+            batch = candidates[i:i + 5]
+            metas = await asyncio.gather(*(fetch_meta(session, url) for url, _ in batch))
+            checked += len(batch)
+            for (url, text), meta in zip(batch, metas):
+                if mentions(game, text, meta.get("og:title", ""), meta.get("og:description", ""),
+                            meta.get("description", "")):
+                    results.append((int(STORY_RE.match(urlparse(url).path).group(1)), url, meta, text))
+            if len(results) >= count:
+                break
+    results.sort(key=lambda r: -r[0])
+    results = results[:count]
+    print(f"[game] {game!r} 搜尋頁 {len(links)} 個連結，檢查 {checked} 篇，"
+          f"符合 {len(results)} 篇")
+    return search_url, [article_embed(url, meta, text) for _, url, meta, text in results]
 
 
 intents = discord.Intents.default()
