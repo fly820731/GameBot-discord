@@ -16,7 +16,7 @@ Discord Bot：輸入遊戲名稱，列出這款遊戲在聯合新聞網・遊戲
 
 `/game name:<遊戲名稱> count:<1–10，預設 5>`（所有人可用，結果公開）
 
-1. 先 defer（顯示思考中），下載 `SEARCH_URL`（逾時 20 秒、只讀前 2 MB、瀏覽器 User-Agent）。
+1. 先 defer（顯示思考中），下載 `SEARCH_URL`（逾時 30 秒、只讀前 2 MB、瀏覽器 User-Agent）。
 2. 找出搜尋結果頁裡所有 `udn.com` 的文章連結（路徑 `/game/story/<分類>/<編號>` 或 `/news/story/<分類>/<編號>`），去掉查詢參數、去重。搜尋頁也有側欄「最新／熱門文章」，所以要過濾：
    - 連結文字已含遊戲名稱的排前面，其餘在後，各自依文章編號由新到舊；最多檢查 20 篇。
    - 每次同時下載 5 篇文章，讀 `og:title`、`og:description`、`og:image`、發布時間（`article:published_time`／`datePublished`／`date`）。
